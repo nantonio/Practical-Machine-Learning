@@ -1,0 +1,125 @@
+---
+title: "Practical Machine Learning - Course Project"
+author: "Nuno Antonio"
+date: "April 2015"
+output: html_document
+---
+
+Introduction
+------------
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.<br>
+The goal of this project is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information about this "Weight Lifting Exercises" can be found at http://groupware.les.inf.puc-rio.br/har.
+
+
+Methodology
+-----------
+**Data acquisition**<br>
+The full dataset can be found at http://groupware.les.inf.puc-rio.br/static/WLE/WearableComputing_weight_lifting_exercises_biceps_curl_variations.csv.(1)<br>
+
+**Data preprocessing**<br>
+As defined in the project assignment the data was loaded in a training and test set, from the supplied URLs, respectively:<br>
+- Training set:https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv<br>
+- Testing set:https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv<br>
+The training set contained 19622 observations, while the test set contained 20 observations.
+
+```{r, results='hide'}
+# Required packages
+library('lattice')
+library('ggplot2')
+library('caret')
+library('randomForest')
+library('corrplot')
+
+# Load training and test sets
+trainingSet=read.csv('../../Data/Raw data/pml-training.csv',sep=',')
+testSet=read.csv('../../Data/Raw data/pml-testing.csv',sep=',')
+dim(trainingSet)
+dim(testSet)
+```
+
+<br>**Exploration analysys**<br>
+By exploring the training set it was possible to observe that from the 160 variables, some had a high number of missing values (ex: "var_accel_dumbbell","avg_roll_dubbell","stddev_roll_dumbbell", among others).
+```{r , results='hide'}
+summary(trainingSet)
+```
+
+From the training set, only 406 observations had no missing values, therefore, only using the completed observations wasn't an option.
+```{r , results='hide'}
+sum(complete.cases(trainingSet))
+```
+
+<br>*Data cleaning*<br>
+All missing values columns and columns which were not considered predictors were removed from the data, leaving the training set with 53 variables. 
+```{r , results='hide'}
+# Remove NA's
+cleanedTrainingSet <- trainingSet[, colSums(is.na(trainingSet))==0]
+# Remove Index, Timestamp and Window variables as they are not predictors
+tempClasse <- cleanedTrainingSet$classe
+tempVar1 <- grepl('^X|timestamp|window',names(cleanedTrainingSet))
+cleanedTrainingSet <- cleanedTrainingSet[, !tempVar1]
+cleanedTrainingSet <- cleanedTrainingSet[, sapply(cleanedTrainingSet, is.numeric)]
+cleanedTrainingSet$classe <- tempClasse
+```
+
+<br>*Visualization*<br>
+To identify predictors the correlation between variables was evaluated and plotted, however, no pattern was found.
+```{r , results='hide'}
+# Verify high correlated predictors 
+M <- abs(cor(cleanedTrainingSet[,-53]))
+diag(M) <- 0
+which(M > 0.8, arr.ind=T)
+# Plot the correlations
+cp <- cor(cleanedTrainingSet[, -length(names(cleanedTrainingSet))])
+png(file='corr.png',width=1400,height=1200)
+corrplot(cp,method='color',addCoef.col='grey',order='AOE')
+dev.off()
+```
+
+Model creation
+-----------
+Since a high number of variables where correlated it was decided to use all the variables in Random Forest algorithm for the model creation. The training data was sliced in 60% for training and 40% for probe (cross-validation).
+```{r , results='hide'}
+# Slice the training data for cross validation
+set.seed(1234)
+trainingPartition <- createDataPartition(cleanedTrainingSet$classe, p=0.6, list=FALSE)
+trainSet <- cleanedTrainingSet[trainingPartition,]
+probeSet <- cleanedTrainingSet[-trainingPartition,]
+# Create model with Random Forest with a 5-fold cross validation
+control <- trainControl(method='cv', 5)
+modelFit <- train(classe ~., data=trainSet, method='rf', trControl=control, ntree=100)
+confusionMatrix(trainSet$classe,predict(modelFit,trainSet))
+confusionMatrix(probeSet$classe,predict(modelFit,probeSet))
+modelFit$finalModel
+```
+Since the Accuracy on the training set was at 100% (99.97% to 100% in the 95% CI) and at 98.84% in the prove (cross validation) set and the estimated OOB error rate was of 1.08% it was decided to use this model. The following step, was to apply the model to the test set.
+
+Results
+-----------
+```{r }
+# Apply the model to the test set
+tempVar2 <- subset(trainSet, select= -c(classe))
+keeps <- names(tempVar2) 
+testSet <- testSet[keeps]
+result <- predict(modelFit, testSet)
+```
+
+Conclusions
+-----------
+Since the model Accuracy presented such good results in the training and cross validation datasets' it's expected that the results on the test set are equally good.<br>
+The results were submited using the code defined by Coursera.
+
+```{r}
+#Submit results
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(result)
+```
+
+References
+-----------
+(1) Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
